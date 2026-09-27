@@ -1,0 +1,145 @@
+import argparse
+import csv
+import re
+import urllib.request
+from collections import defaultdict
+from datetime import datetime
+
+
+def download_file(url):
+    """Download the CSV log file from the given URL and return its text content."""
+    response = urllib.request.urlopen(url)
+    data = response.read().decode("utf-8")
+    return data
+
+
+def process_file(data):
+    """
+    Parse the CSV text data into a list of rows.
+    Each row is a dict with keys: path, datetime, browser, status, size
+    """
+    rows = []
+    reader = csv.reader(data.splitlines())
+    for line in reader:
+        if not line or len(line) < 5:
+            continue
+        rows.append({
+            "path": line[0].strip(),
+            "datetime": line[1].strip(),
+            "browser": line[2].strip(),
+            "status": line[3].strip(),
+            "size": line[4].strip(),
+        })
+    return rows
+
+
+def find_image_hits(rows):
+    """
+    Search for hits that are for image files (.jpg, .gif, .png) using a
+    regular expression, and print the percentage of all hits they represent.
+    """
+    image_pattern = re.compile(r"\.(jpg|gif|png)$", re.IGNORECASE)
+    image_hits = [r for r in rows if image_pattern.search(r["path"])]
+
+    total = len(rows)
+    if total == 0:
+        print("No hits found in the log file.")
+        return
+
+    percentage = (len(image_hits) / total) * 100
+    print(f"Image requests account for {percentage:.1f}% of all requests")
+
+
+def find_popular_browser(rows):
+    """
+    Determine the most popular browser (Firefox, Chrome, Internet Explorer,
+    or Safari) using regular expressions on the User-Agent string, and print
+    the winner.
+    """
+    browser_patterns = {
+        "Firefox": re.compile(r"Firefox", re.IGNORECASE),
+        "Chrome": re.compile(r"Chrome", re.IGNORECASE),
+        "Internet Explorer": re.compile(r"MSIE|Trident", re.IGNORECASE),
+        "Safari": re.compile(r"Safari", re.IGNORECASE),
+    }
+
+    counts = defaultdict(int)
+
+    for row in rows:
+        user_agent = row["browser"]
+        # Chrome's UA string also contains "Safari", so check Chrome first.
+        if browser_patterns["Chrome"].search(user_agent):
+            counts["Chrome"] += 1
+        elif browser_patterns["Firefox"].search(user_agent):
+            counts["Firefox"] += 1
+        elif browser_patterns["Internet Explorer"].search(user_agent):
+            counts["Internet Explorer"] += 1
+        elif browser_patterns["Safari"].search(user_agent):
+            counts["Safari"] += 1
+
+    if not counts:
+        print("No recognizable browsers found in the log file.")
+        return
+
+    most_popular = max(counts, key=counts.get)
+    print(f"The most popular browser is {most_popular} with {counts[most_popular]} hits")
+
+
+def find_hits_by_hour(rows):
+    """
+    Extra Credit: extract the hour from each hit's datetime and print
+    the number of hits per hour, for all 24 hours, sorted from most to
+    least hits.
+    """
+    hour_counts = defaultdict(int)
+    # The datetime column can appear in slightly different formats
+    # depending on the log file, so try each known format in turn.
+    datetime_formats = ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S")
+
+    for row in rows:
+        dt = None
+        for fmt in datetime_formats:
+            try:
+                dt = datetime.strptime(row["datetime"], fmt)
+                break
+            except ValueError:
+                continue
+        if dt is None:
+            continue
+        hour_counts[dt.hour] += 1
+
+    # Make sure every hour 0-23 is represented, even with 0 hits
+    for hour in range(24):
+        if hour not in hour_counts:
+            hour_counts[hour] = 0
+
+    sorted_hours = sorted(hour_counts.items(), key=lambda x: x[1], reverse=True)
+
+    for hour, count in sorted_hours:
+        print(f"Hour {hour:02d} has {count} hits")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Process a website's web log CSV file.")
+    parser.add_argument(
+        "--url",
+        help="URL to the datafile (web log CSV)",
+        type=str,
+        required=True,
+    )
+    args = parser.parse_args()
+
+    print(f"Downloading log file from {args.url} ...")
+    data = download_file(args.url)
+
+    rows = process_file(data)
+    print(f"Processed {len(rows)} rows.\n")
+
+    find_image_hits(rows)
+    find_popular_browser(rows)
+    print("\nHits by hour (Extra Credit):")
+    find_hits_by_hour(rows)
+
+
+if __name__ == "__main__":
+    main()
